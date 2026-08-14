@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,18 +37,20 @@ void insert(struct Tree *tree, const char *value) {
     tree->root = _insert_node(tree->root, value);
 }
 
-static struct Node *_adopt(struct Node *root, struct Node *node) {
+/* wtf, I designed this, but still cannot fully comprehendit as a whole
+ * and clear animation inside my mind */
+static struct Node *_adopt(struct Node *restrict root, struct Node *restrict node, int depth) {
     if (root == NULL) {
         return node;
     }
     if (node == NULL) {
         return root;
+    }    
+    if (depth % 2 == 0) {
+        root->right = _adopt(node, root->right, depth + 1);
+    } else {
+        root->left = _adopt(node, root->left, depth + 1);
     }
-    // caller _delete() or _adopt() assured the node is greater than root
-    // and there shall not have been any equal nodes
-    assert(strcmp(root->value, node->value) < 0);
-    
-    root->right = _adopt(root->right, node);
     return root;
 }
 
@@ -65,14 +66,11 @@ static struct Node *_delete(struct Node *node, const char *value) {
         node->right = _delete(node->right, value);
         return node;
     } else /* equal */ {
-        struct Node *left = node ->left;
-        struct Node *right = node ->right;
+        struct Node *left = node->left;
+        struct Node *right = node->right;
         free(node->value);
         free(node);
-        return _adopt(left, right);
-        /* Why not implement it as a loop?
-         * The answer: Too used to write recrusive code when handling tree.
-         */
+        return _adopt(left, right, 0);
     }
 }
 
@@ -80,6 +78,24 @@ static struct Node *_delete(struct Node *node, const char *value) {
  * quite obious though. */
 void delete(struct Tree *tree, const char *value) {
     tree->root = _delete(tree->root, value);
+}
+    
+static struct Node *_find(struct Node *root, const char *value) {
+    if (root == NULL) {
+        return NULL;
+    }
+    int cmp = strcmp(root->value, value);
+    if (cmp > 0) {
+        return _find(root->left, value);
+    } else if (cmp < 0) {
+        return _find(root->right, value);
+    } else /* equal */ {
+        return root; /* found */
+    }
+}
+
+_Bool is_there(struct Tree *tree, const char *value) {
+    return _find(tree->root, value) != NULL;
 }
 
 static void _print_node(const struct Node *node, int depth) {
@@ -137,11 +153,17 @@ int main() {
     insert(&t, "LFS");
     print_all_in_order_pretty(&t);
 
-
+    assert(is_there(&t, "Debian GNU/Hurd"));
+    
+    
     delete(&t, "Linux Mint"); // the root!
+#if 1 /* comment it in order only to remove one node */
     delete(&t, "Fedora");     /* and then just delete some random things */
     delete(&t, "Void Linux"); /* no political reasons involved */
     delete(&t, "Gentoo");
     delete(&t, "nonexistence"); /* also test this */
+#endif 
     print_all_in_order_pretty(&t);
+
+    assert(!is_there(&t, "Linux Mint"));
 }
