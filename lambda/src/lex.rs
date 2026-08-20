@@ -1,82 +1,72 @@
-use std::io::Read;
+use std::{iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone)]
 pub enum Token {
     Lambda, // \
     Identifyer(String),
-    Dot, // .
-    LeftPar, // (
-    RightPar,  // )
+    Dot,      // .
+    LeftPar,  // (
+    RightPar, // )
 }
 
-pub struct TokenStream<R: Read> {
-    input: R,
-    current_char: Option<char>,
+pub struct TokenStream<'a> {
+    input: Peekable<Chars<'a>>,
 }
 
-impl<R: Read> TokenStream<R> {
-    pub fn new(input: R) -> Self {
+impl<'a> TokenStream<'a> {
+    pub fn new(input: Chars<'a>) -> Self {
         Self {
-            input,
-            current_char: None,
+            input: input.peekable(),
         }
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.current_char {
-            if c.is_whitespace() {
-                self.next_char();
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn next_char(&mut self) {
-        let mut c = [0; 1];
-        if let Ok(_) = self.input.read(&mut c) {
-            self.current_char = Some(c[0] as char);
-        } else {
-            self.current_char = None;
-        }
-    }
-
+    // Very large amount of extraordinary chars are passed LOL
     fn is_identifiable(c: char) -> bool {
         c != '\\' && c != '.' && c != '(' && c != ')' && !c.is_whitespace()
     }
 
     pub fn next(&mut self) -> Option<Token> {
-        if self.current_char == None {
-            self.next_char()
-        }
-        self.skip_whitespace();
-        let c = self.current_char?;
-        match c {
-            '\0' => { // '\0' is termination of stdin (Ctrl+D in UNIX, Ctrl+Z in Windows)
-                self.current_char = None;
+        let chr;
+        // skip whitespaces
+        loop {
+            let Some(c) = self.input.next() else {
                 return None;
-            }
-            '\\' | '.' | '(' | ')' => {
-                self.current_char = None;
-                match c {
-                    '\\' => return Some(Token::Lambda),
-                    '.' => return Some(Token::Dot),
-                    '(' => return Some(Token::LeftPar),
-                    ')' => return Some(Token::RightPar),
-                    _ => unreachable!(),
-                }
-            }
-            _ => {}
-        }
-        let mut str = String::new();
-        while let Some(c) = self.current_char {
-            if Self::is_identifiable(c) {
-                str.push(c);
-                self.next_char();
-            } else {
+            };
+            if !c.is_whitespace() {
+                chr = c;
                 break;
             }
         }
+        match chr {
+            '\0' => unreachable!(), // The caller dares not ever to send me a null character!
+            '\\' => return Some(Token::Lambda),
+            '.' => return Some(Token::Dot),
+            '(' => return Some(Token::LeftPar),
+            ')' => return Some(Token::RightPar),
+            _ => {}
+        }
+
+        let mut str = String::new();
+        str.push(chr);
+        loop {
+            let Some(c) = self.input.peek() else {
+                break;
+            };
+            let c = c.clone();
+            if !Self::is_identifiable(c) {
+                break;
+            }
+            str.push(c);
+            self.input.next();
+        }
         Some(Token::Identifyer(str))
+    }
+
+    pub fn collect(&mut self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        while let Some(token) = self.next() {
+            tokens.push(token);
+        }
+        tokens
     }
 }

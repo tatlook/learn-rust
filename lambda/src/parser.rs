@@ -1,7 +1,4 @@
-use crate::lex;
 use crate::lex::Token;
-
-use std::io::Read;
 
 use std::fmt::Display;
 
@@ -32,93 +29,70 @@ impl Display for Expression {
     }
 }
 
-pub struct Parser<R: Read> {
-    stream: lex::TokenStream<R>,
+pub struct Parser {
+    tokens: Vec<Token>,
+    index: usize,
 }
 
-impl<R: Read> Parser<R> {
-    pub fn new(stream: lex::TokenStream<R>) -> Self {
-        Self { stream }
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Self {
+            tokens,
+            index: 0 as usize,
+        }
     }
 
-    // lambda is already consumed, so we expect an identifier, a dot, and then an expression
     fn parse_function(&mut self) -> Result<Expression, String> {
-        let token = self
-            .stream
-            .next()
-            .ok_or("Unexpected end of input, expected identifier")?;
-        let Token::Identifyer(param) = token else {
-            return Err(format!("Expected identifier, found {:?}", token));
+        let Some(Token::Identifyer(name)) =
+            self.tokens.get(self.index).cloned()
+        else {
+            return Err("Expected funtion name".to_string());
         };
-        let token = self
-            .stream
-            .next()
-            .ok_or("Unexpected end of input, expected dot")?;
-        let Token::Dot = token else {
-            return Err(format!("Expected '.', found {:?}", token));
+        self.index += 1;
+        let Some(Token::Dot) = self.tokens.get(self.index) else {
+            return Err("Expected dot".to_string());
         };
-        let body = self.parse_expression()?;
+        self.index += 1;
+        let body = self.parse_application_chain()?;
         Ok(Expression::Function {
-            param,
+            param: name,
             body: Box::new(body),
         })
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, String> {
-        let Some(Token::LeftPar) = self.stream.next() else {
-            return Err("Expected '('".to_string());
+    fn parse_application_chain(&mut self) -> Result<Expression, String> {
+        let mut exprs = Vec::<Expression>::new();
+        loop {
+            let Some(token) = self.tokens.get(self.index).cloned() else {
+                break;
+            };
+            self.index += 1;
+            match token {
+                Token::Lambda => exprs.push(self.parse_function()?),
+                Token::Identifyer(name) => {
+                    exprs.push(Expression::Variable(name))
+                }
+                Token::LeftPar => exprs.push(self.parse_application_chain()?),
+                Token::RightPar => break,
+                Token::Dot => return Err("Unexpected dot".to_string()),
+            }
+        }
+        /* Reassemble the list into a tree left-associativily
+         * Like from a b c d e to (((a b) c) d) e */
+        let mut exprs = exprs.into_iter();
+        let Some(mut left) = exprs.next() else {
+            return Err("Empty list".to_string());
         };
-        if let Some(exp) = self.parse_before_right_par()? {
-            Ok(exp)
-        } else {
-            Err("Empty expression".to_string())
+        for expr in exprs {
+            left = Expression::Application {
+                function: Box::new(left),
+                arg: Box::new(expr),
+            }
         }
+        Ok(left)
     }
 
-    fn parse_before_right_par(&mut self) -> Result<Option<Expression>, String> {
-        let token = self.stream.next().ok_or("Unexpected end of input")?;
-        match token {
-            Token::RightPar => return Ok(None),
-            Token::LeftPar => {
-                let func = self.parse_before_right_par()?;
-                if let None = func {
-                    return Ok(None);
-                }
-                let arg = self.parse_before_right_par()?;
-                if let None = arg {
-                    return Ok(func);
-                }
-                return Ok(Some(Expression::Application {
-                    function: Box::new(func.unwrap()),
-                    arg: Box::new(arg.unwrap()),
-                }));
-            }
-            Token::Lambda => {
-                let func = self.parse_function()?;
-                let arg = self.parse_before_right_par()?;
-                if let None = arg {
-                    return Ok(Some(func));
-                }
-                return Ok(Some(Expression::Application {
-                    function: Box::new(func),
-                    arg: Box::new(arg.unwrap()),
-                }));
-            }
-            Token::Identifyer(name) => {
-                let arg = self.parse_before_right_par()?;
-                if let None = arg {
-                    return Ok(Some(Expression::Variable(name)));
-                }
-                return Ok(Some(Expression::Application {
-                    function: Box::new(Expression::Variable(name)),
-                    arg: Box::new(arg.unwrap()),
-                }));
-            }
-            token => return Err(format!("Unexpected token: {:?}", token)),
-        }
-    }
-
-    pub fn parse(&mut self) -> Result<Expression, String> {
-        return self.parse_expression();
+    pub fn parse(mut self) -> Result<Expression, String> {
+        return self.parse_application_chain();
     }
 }

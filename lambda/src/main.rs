@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-};
+use std::{collections::HashMap, io::Write};
 
 use crate::{lex::Token, parser::Expression};
 
@@ -94,6 +91,18 @@ eval or e <expression>            evaluate an expression
     );
 }
 
+fn get_expression(stream: &mut lex::TokenStream) -> Option<parser::Expression> {
+    let tokens = stream.collect();
+    let parser = parser::Parser::new(tokens);
+    match parser.parse() {
+        Ok(expr) => Some(expr),
+        Err(e) => {
+            eprintln!("Error parsing expression: {}", e);
+            None
+        }
+    }
+}
+
 fn main() {
     println!(
         "No copyright (CC0) 2026 Youzhe Zhen
@@ -104,8 +113,13 @@ type `help` for helps, `exit` to exit"
     loop {
         print!("<3 "); // heart LOL
         std::io::stdout().flush().unwrap();
-        let mut s = lex::TokenStream::new(std::io::stdin());
-        let Some(Token::Identifyer(command)) = s.next() else {
+
+        let mut str = String::new();
+        std::io::stdin().read_line(&mut str).unwrap();
+        let mut stream = lex::TokenStream::new(str.chars());
+
+        let Some(Token::Identifyer(command)) = stream.next() else {
+            /* lines begin with anything but identifyer is a comment */
             continue;
         };
         match command.as_str() {
@@ -115,43 +129,24 @@ type `help` for helps, `exit` to exit"
                 continue;
             }
             "eval" | "e" => {
-                let mut parser = parser::Parser::new(s);
-                match parser.parse() {
-                    Ok(expr) => {
-                        println!("Parsed expression: {}", expr);
-                        let expr = simplefy(expr);
-                        println!("Simplified expression: {}", expr);
-                    }
-                    Err(e) => {
-                        eprintln!("Error parsing expression: {}", e);
-                        /* Skip the rest of the line, so that we can read the next expression
-                        FIXME: sometimes it needs to re-press the enter key */
-                        std::io::stdin().read_line(&mut String::new()).unwrap();
-                    }
+                let Some(expr) = get_expression(&mut stream) else {
+                    continue;
                 };
+                println!("{}", simplefy(expr));
             }
             "set" | "s" => {
-                let Some(Token::Identifyer(name)) = s.next() else {
+                let Some(Token::Identifyer(name)) = stream.next() else {
                     eprintln!("set: Expected variable name");
                     continue;
                 };
-                let mut parser = parser::Parser::new(s);
-                match parser.parse() {
-                    Ok(expr) => {
-                        let expr = simplefy(expr);
-                        println!("{} = {}", name, expr);
-                        variables.insert(name, expr);
-                    }
-                    Err(e) => {
-                        eprintln!("Error parsing expression: {}", e);
-                        /* Skip the rest of the line, so that we can read the next expression
-                        FIXME: sometimes it needs to re-press the enter key */
-                        std::io::stdin().read_line(&mut String::new()).unwrap();
-                    }
+                let Some(expr) = get_expression(&mut stream) else {
+                    continue;
                 };
+                println!("{} = {}", name, expr);
+                variables.insert(name, expr);
             }
             "cat" | "c" => {
-                let Some(Token::Identifyer(name)) = s.next() else {
+                let Some(Token::Identifyer(name)) = stream.next() else {
                     eprintln!("cat: Expected variable name");
                     continue;
                 };
