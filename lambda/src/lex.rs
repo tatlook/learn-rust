@@ -4,7 +4,7 @@ use std::io::Read;
 pub enum Token {
     Lambda, // \
     Identifyer(String),
-    Dot, //
+    Dot, // .
     LeftPar, // (
     RightPar,  // )
 }
