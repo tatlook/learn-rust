@@ -43,19 +43,29 @@ impl Parser {
     }
 
     fn parse_function(&mut self) -> Result<Expression, String> {
-        let Some(Token::Identifyer(name)) =
+        self.index += 1; /* skip lambda */
+        let Some(Token::Identifyer(param)) =
             self.tokens.get(self.index).cloned()
         else {
-            return Err("Expected funtion name".to_string());
+            return Err("Expected parameter name".to_string());
         };
         self.index += 1;
         let Some(Token::Dot) = self.tokens.get(self.index) else {
             return Err("Expected dot".to_string());
         };
         self.index += 1;
+        if let Some(Token::Lambda) = self.tokens.get(self.index) {
+            /* special treatment for \x.\y.N
+             * Without this, (\x.\y.N) M is parsed as (\x.(\y.N) M) */
+            let inner_function = self.parse_function()?;
+            return Ok(Expression::Function {
+                param,
+                body: Box::new(inner_function),
+            });
+        }
         let body = self.parse_application_chain()?;
         Ok(Expression::Function {
-            param: name,
+            param,
             body: Box::new(body),
         })
     }
@@ -66,14 +76,19 @@ impl Parser {
             let Some(token) = self.tokens.get(self.index).cloned() else {
                 break;
             };
-            self.index += 1;
             match token {
                 Token::Lambda => exprs.push(self.parse_function()?),
                 Token::Identifyer(name) => {
+                    self.index += 1;
                     exprs.push(Expression::Variable(name))
                 }
-                Token::LeftPar => exprs.push(self.parse_application_chain()?),
+                Token::LeftPar => {
+                    self.index += 1; /* skip ( */
+                    exprs.push(self.parse_application_chain()?);
+                    self.index += 1; /* skip ) */
+                }
                 Token::RightPar => break,
+
                 Token::Dot => return Err("Unexpected dot".to_string()),
             }
         }
