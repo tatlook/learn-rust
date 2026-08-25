@@ -20,11 +20,14 @@ set pair    \a.\b.\s. s a b
 set fst     \p. p true
 set snd     \p. p false
 
-set 0       \f.\x. x
 set succ    \n.\f.\x. f (n f x)
 set add     \m.\n.\f.\x. m f (n f x)
 set mul     \m.\n.\f. m (n f)
 set is0     \n. n (\x. false) true
+set 0       \f.\x. x
+set 1       succ 0
+set 2       succ 1
+) it may be too annoying if we pre-define too much numbers
 
 set pred    \n. fst (n (\p. pair (snd p) (succ (snd p))) (pair 0 0))
 
@@ -34,14 +37,14 @@ set pred    \n. fst (n (\p. pair (snd p) (succ (snd p))) (pair 0 0))
 fn help() {
     println!(
         "This is a simple lambda calculus interpreter.
-
-eval or e <expression>            evaluate an expression
- set or s <variable> <expression> define a variable
- cat or c <variable>              look at its value (unevaluated)
-        ls                        list all defined variables
-        std                       load the standard liberary
-        help                      show this message
-        exit                      exit the interpreter"
+eval, e, n or nf <expression>    reduct, normal order
+ cn or whnf <expression>         reduct, call-by-name
+set or s <variable> <expression> define a variable
+cat or c <variable>              look at its value (unevaluated)
+       ls                        list all defined variables
+       std                       load the standard liberary
+       help                      show this message
+       exit                      exit the interpreter"
     );
 }
 
@@ -93,13 +96,22 @@ fn interpret(
                     println!("{} = {}", name, value)
                 }
             }
-            "eval" | "e" => {
+            "eval" | "e" | "n" | "nf" => {
                 let Some(expr) = get_expression(&mut stream) else {
                     continue;
                 };
                 let mut engine = eval::Engine::new();
                 let expr = engine.put_variables(expr, &variables);
-                let expr = engine.evaluate(expr);
+                let expr = engine.reduct_normal_order(expr);
+                println!("{}", expr);
+            }
+            "cn" | "whnf" => {
+                let Some(expr) = get_expression(&mut stream) else {
+                    continue;
+                };
+                let mut engine = eval::Engine::new();
+                let expr = engine.put_variables(expr, &variables);
+                let expr = engine.reduct_call_by_name(expr);
                 println!("{}", expr);
             }
             "set" | "s" => {
