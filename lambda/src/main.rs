@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    io::{BufRead, BufReader, Cursor, Write},
-};
+use std::collections::HashMap;
+
+use rustyline::error::ReadlineError;
 
 use crate::{lex::Token, parser::Expression};
 
@@ -34,9 +33,7 @@ set pred    \n. fst (n (\p. pair (snd p) (succ (snd p))) (pair 0 0))
 ) TODO: add more functions
 ";
 
-fn help() {
-    println!(
-        "This is a simple lambda calculus interpreter.
+static HELP_TEXT: &str = "This is a simple lambda calculus interpreter.
 eval, e, n or nf <expression>    reduct, normal order
  cn or whnf <expression>         reduct, call-by-name
 set or s <variable> <expression> define a variable
@@ -44,9 +41,7 @@ cat or c <variable>              look at its value (unevaluated)
        ls                        list all defined variables
        std                       load the standard liberary
        help                      show this message
-       exit                      exit the interpreter"
-    );
-}
+       exit                      exit the interpreter";
 
 fn get_expression(stream: &mut lex::TokenStream) -> Option<parser::Expression> {
     let tokens = stream.collect();
@@ -60,86 +55,103 @@ fn get_expression(stream: &mut lex::TokenStream) -> Option<parser::Expression> {
     }
 }
 
-fn interpret(
-    input: impl BufRead,
-    mut hint: impl Write,
+/** Returns if the command say you should exit the loop */
+fn execute_command(
     variables: &mut HashMap<String, Expression>,
-) {
-    let mut lines = input.lines();
+    str: String,
+) -> bool {
+    let mut stream = lex::TokenStream::new(str.chars());
+    let Some(Token::Identifyer(command)) = stream.next() else {
+        /* lines begin with anything but identifyer is a comment */
+        return false;
+    };
+    match command.as_str() {
+        "exit" => return true,
+        "help" => {
+            println!("{HELP_TEXT}");
+        }
+        "std" => {
+            load_stdandard_lib(variables);
+        }
+        "ls" => {
+            for (name, value) in variables.iter() {
+                println!("{} = {}", name, value)
+            }
+        }
+        "eval" | "e" | "n" | "nf" => {
+            let Some(expr) = get_expression(&mut stream) else {
+                return false;
+            };
+            let mut engine = eval::Engine::new();
+            let expr = engine.put_variables(expr, &variables);
+            let expr = engine.reduct_normal_order(expr);
+            println!("{}", expr);
+        }
+        "cn" | "whnf" => {
+            let Some(expr) = get_expression(&mut stream) else {
+                return false;
+            };
+            let mut engine = eval::Engine::new();
+            let expr = engine.put_variables(expr, &variables);
+            let expr = engine.reduct_call_by_name(expr);
+            println!("{}", expr);
+        }
+        "set" | "s" => {
+            let Some(Token::Identifyer(name)) = stream.next() else {
+                eprintln!("set: Expected variable name");
+                return false;
+            };
+            let Some(expr) = get_expression(&mut stream) else {
+                return false;
+            };
+            let mut engine = eval::Engine::new();
+            let expr = engine.put_variables(expr, &variables);
+            variables.insert(name, expr);
+        }
+        "cat" | "c" => {
+            let Some(Token::Identifyer(name)) = stream.next() else {
+                eprintln!("cat: Expected variable name");
+                return false;
+            };
+            if let Some(expr) = variables.get(&name) {
+                println!("{} = {}", name, expr)
+            } else {
+                println!("{} =", name);
+            }
+        }
+        command => {
+            eprintln!("Unknown command: {}", command);
+        }
+    }
+    return false;
+}
+
+fn load_stdandard_lib(variables: &mut HashMap<String, Expression>) {
+    for line in STANDARD_LIBERARY.lines() {
+        if execute_command(variables, line.to_string()) {
+            break;
+        }
+    }
+}
+
+fn interpret_stdin(variables: &mut HashMap<String, Expression>) {
+    let mut rl = rustyline::DefaultEditor::new().unwrap();
     loop {
-        write!(hint, ">>> ").unwrap(); /* Let's steal it from Python */
-        hint.flush().unwrap();
-
-        let Some(str) = lines.next() else { break };
-        let str = str.unwrap();
-        let mut stream = lex::TokenStream::new(str.chars());
-
-        let Some(Token::Identifyer(command)) = stream.next() else {
-            /* lines begin with anything but identifyer is a comment */
-            continue;
-        };
-        match command.as_str() {
-            "exit" => break,
-            "help" => {
-                help();
-                continue;
-            }
-            "std" => {
-                interpret(
-                    Cursor::new(String::from(STANDARD_LIBERARY)),
-                    &mut std::io::sink(),
-                    variables,
-                );
-            }
-            "ls" => {
-                for (name, value) in variables.iter() {
-                    println!("{} = {}", name, value)
+        /* Let's steal the prompt from Python */
+        match rl.readline(">>> ") {
+            Ok(str) => {
+                let _ = rl.add_history_entry(str.as_str());
+                if execute_command(variables, str) {
+                    break;
                 }
             }
-            "eval" | "e" | "n" | "nf" => {
-                let Some(expr) = get_expression(&mut stream) else {
-                    continue;
-                };
-                let mut engine = eval::Engine::new();
-                let expr = engine.put_variables(expr, &variables);
-                let expr = engine.reduct_normal_order(expr);
-                println!("{}", expr);
+            Err(ReadlineError::Eof) => break,
+            Err(ReadlineError::Interrupted) => {
+                eprintln!("interrupted");
+                break;
             }
-            "cn" | "whnf" => {
-                let Some(expr) = get_expression(&mut stream) else {
-                    continue;
-                };
-                let mut engine = eval::Engine::new();
-                let expr = engine.put_variables(expr, &variables);
-                let expr = engine.reduct_call_by_name(expr);
-                println!("{}", expr);
-            }
-            "set" | "s" => {
-                let Some(Token::Identifyer(name)) = stream.next() else {
-                    eprintln!("set: Expected variable name");
-                    continue;
-                };
-                let Some(expr) = get_expression(&mut stream) else {
-                    continue;
-                };
-                let mut engine = eval::Engine::new();
-                let expr = engine.put_variables(expr, &variables);
-                writeln!(hint, "{} = {}", name, expr).unwrap();
-                variables.insert(name, expr);
-            }
-            "cat" | "c" => {
-                let Some(Token::Identifyer(name)) = stream.next() else {
-                    eprintln!("cat: Expected variable name");
-                    continue;
-                };
-                if let Some(expr) = variables.get(&name) {
-                    println!("{} = {}", name, expr)
-                } else {
-                    println!("{} =", name);
-                }
-            }
-            command => {
-                eprintln!("Unknown command: {}", command);
+            Err(err) => {
+                eprintln!("Error occured: {err}");
                 continue;
             }
         }
@@ -151,9 +163,5 @@ fn main() {
         "No copyright (CC0) 2026 Youzhe Zhen
 type `help` for helps, `exit` to exit"
     );
-    interpret(
-        BufReader::new(std::io::stdin()),
-        std::io::stdout(),
-        &mut HashMap::<String, Expression>::new(),
-    );
+    interpret_stdin(&mut HashMap::<String, Expression>::new());
 }
